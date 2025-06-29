@@ -9,6 +9,39 @@ import numpy as np
 from lightfm.datasets import _common
 
 
+class LilMatrix:
+    """Simple replacement for scipy.sparse.lil_matrix"""
+    def __init__(self, shape, dtype=None):
+        self.shape = shape
+        self.dtype = dtype
+        self.data = {}
+    
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    
+    def tocoo(self):
+        """Convert to COO format - returns a simple object with row, col, data arrays"""
+        rows = []
+        cols = []
+        data = []
+        
+        for (row, col), value in self.data.items():
+            rows.append(row)
+            cols.append(col)
+            data.append(value)
+        
+        return CooMatrix(rows, cols, data, self.shape)
+
+
+class CooMatrix:
+    """Simple replacement for scipy.sparse.coo_matrix"""
+    def __init__(self, row, col, data, shape):
+        self.row = row
+        self.col = col
+        self.data = data
+        self.shape = shape
+
+
 def _read_raw_data(path):
     """
     Return the raw lines of the train and test files.
@@ -54,7 +87,7 @@ def _get_dimensions(train_data, test_data):
 
 def _build_interaction_matrix(rows, cols, data, min_rating):
 
-    mat = sp.lil_matrix((rows, cols), dtype=np.int32)
+    mat = LilMatrix((rows, cols), dtype=np.int32)
 
     for uid, iid, rating, _ in data:
         if rating >= min_rating:
