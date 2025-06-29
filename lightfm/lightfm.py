@@ -16,6 +16,33 @@ from ._lightfm_fast import (
     predict_ranks,
 )
 
+
+class CsrMatrix:
+    """Simple replacement for scipy.sparse.csr_matrix"""
+    def __init__(self, shape, dtype=None):
+        self.shape = shape
+        self.dtype = dtype
+        self.data = {}
+    
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    
+    def __getitem__(self, key):
+        return self.data.get(key, 0)
+
+
+def identity(n, format="csr", dtype=None):
+    """Create an identity matrix - simple replacement for scipy.sparse.identity"""
+    if format == "csr":
+        mat = CsrMatrix((n, n), dtype=dtype)
+        # Set diagonal elements to 1
+        for i in range(n):
+            mat[i, i] = 1.0
+        return mat
+    else:
+        raise ValueError(f"Format '{format}' not supported")
+
+
 __all__ = ["LightFM"]
 
 CYTHON_DTYPE = np.float32
@@ -316,12 +343,12 @@ class LightFM(object):
     ):
 
         if user_features is None:
-            user_features = sp.identity(n_users, dtype=CYTHON_DTYPE, format="csr")
+            user_features = identity(n_users, dtype=CYTHON_DTYPE, format="csr")
         else:
             user_features = user_features.tocsr()
 
         if item_features is None:
-            item_features = sp.identity(n_items, dtype=CYTHON_DTYPE, format="csr")
+            item_features = identity(n_items, dtype=CYTHON_DTYPE, format="csr")
         else:
             item_features = item_features.tocsr()
 
