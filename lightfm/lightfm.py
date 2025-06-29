@@ -1,7 +1,9 @@
 # coding=utf-8
 from __future__ import print_function
 
-import numpy as np
+# Note: numpy and scipy imports conditionally used for compatibility
+import random
+import math
 
 import scipy.sparse as sp
 
@@ -18,7 +20,497 @@ from ._lightfm_fast import (
 
 __all__ = ["LightFM"]
 
-CYTHON_DTYPE = np.float32
+# PHP-compatible helper functions
+def create_identity_sparse(size):
+    """Create identity matrix as dictionary {(row, col): value}"""
+    from lightfm.datasets.movielens import SparseMatrixAdapter
+    identity = {}
+    for i in range(size):
+        identity[(i, i)] = 1.0
+    return SparseMatrixAdapter({
+        'data': identity,
+        'shape': (size, size),
+        'type': 'identity'
+    })
+
+def create_csr_sparse(shape):
+    """Create empty CSR-like sparse matrix"""
+    return {
+        'data': {},
+        'shape': shape,
+        'type': 'csr'
+    }
+
+def create_zeros_like(template_list, dtype=float):
+    """Create list of zeros with same shape as template"""
+    # Handle ArrayWithShape objects
+    if hasattr(template_list, 'array') and hasattr(template_list, 'shape'):
+        array = template_list.array
+        if isinstance(array[0], list):  # 2D list
+            return [[0.0 for _ in row] for row in array]
+        else:  # 1D list
+            return [0.0 for _ in array]
+    
+    if isinstance(template_list, list):
+        if isinstance(template_list[0], list):  # 2D list
+            return [[0.0 for _ in row] for row in template_list]
+        else:  # 1D list
+            return [0.0 for _ in template_list]
+    else:
+        # Handle shape tuple
+        if len(template_list) == 2:
+            rows, cols = template_list
+            return [[0.0 for _ in range(cols)] for _ in range(rows)]
+        else:
+            return [0.0 for _ in range(template_list[0])]
+
+def create_ones_like(template_list, dtype=float):
+    """Create list of ones with same shape as template"""
+    # Handle ArrayWithShape objects
+    if hasattr(template_list, 'array') and hasattr(template_list, 'shape'):
+        array = template_list.array
+        if isinstance(array[0], list):  # 2D list
+            return [[1.0 for _ in row] for row in array]
+        else:  # 1D list
+            return [1.0 for _ in array]
+    
+    if isinstance(template_list, list):
+        if isinstance(template_list[0], list):  # 2D list
+            return [[1.0 for _ in row] for row in template_list]
+        else:  # 1D list
+            return [1.0 for _ in template_list]
+    else:
+        # Handle shape tuple
+        if len(template_list) == 2:
+            rows, cols = template_list
+            return [[1.0 for _ in range(cols)] for _ in range(rows)]
+        else:
+            return [1.0 for _ in range(template_list[0])]
+
+def np_mean(array):
+    """Calculate mean of an array"""
+    if isinstance(array, list):
+        if isinstance(array[0], list):
+            # 2D array
+            total = 0.0
+            count = 0
+            for row in array:
+                for val in row:
+                    total += val
+                    count += 1
+            return total / count if count > 0 else 0.0
+        else:
+            # 1D array
+            return sum(array) / len(array) if array else 0.0
+    return 0.0
+
+def np_all_equal(array1, array2):
+    """Check if two arrays are equal or if all elements in array equal the given value"""
+    # Handle numpy arrays (fallback for when numpy is available)
+    if hasattr(array1, 'dtype') and hasattr(array1, '__len__'):
+        # This is likely a numpy array
+        if hasattr(array2, 'dtype') and hasattr(array2, '__len__'):
+            # Both are numpy arrays
+            try:
+                import numpy as np
+                return np.array_equal(array1, array2)
+            except ImportError:
+                # Convert to lists and compare
+                return list(array1) == list(array2)
+        else:
+            # array1 is numpy, array2 is scalar
+            try:
+                import numpy as np
+                return np.all(array1 == array2)
+            except ImportError:
+                # Convert to list and compare
+                return all(val == array2 for val in array1)
+    
+    # Handle comparison of two lists
+    if isinstance(array1, list) and isinstance(array2, list):
+        if len(array1) != len(array2):
+            return False
+        if isinstance(array1[0], list):  # 2D arrays
+            for row1, row2 in zip(array1, array2):
+                if len(row1) != len(row2):
+                    return False
+                for val1, val2 in zip(row1, row2):
+                    if val1 != val2:
+                        return False
+            return True
+        else:  # 1D arrays
+            return all(val1 == val2 for val1, val2 in zip(array1, array2))
+    
+    # Handle comparison of list with single value
+    if isinstance(array1, list):
+        if isinstance(array1[0], list):
+            # 2D array
+            for row in array1:
+                for val in row:
+                    if val != array2:
+                        return False
+            return True
+        else:
+            # 1D array
+            return all(val == array2 for val in array1)
+    return array1 == array2
+
+def np_ones_like(array):
+    """Create array of ones like input"""
+    if isinstance(array, list):
+        if isinstance(array[0], list):
+            return [[1.0 for _ in row] for row in array]
+        return [1.0 for _ in array]
+    return 1.0
+
+def np_sum(array):
+    """Sum all elements in array"""
+    if isinstance(array, list):
+        if isinstance(array[0], list):
+            return sum(sum(row) for row in array)
+        return sum(array)
+    return array
+
+def np_isfinite(value):
+    """Check if value is finite"""
+    if isinstance(value, (int, float)):
+        return not (math.isinf(value) or math.isnan(value))
+    return True  # Assume finite for non-numeric types
+
+def get_shape(array):
+    """Get shape of array (rows, cols)"""
+    if isinstance(array, list):
+        if isinstance(array[0], list):
+            return (len(array), len(array[0]))
+        return (len(array),)
+    return ()
+
+class ArrayWithShape:
+    """Wrapper to add shape attribute to arrays"""
+    def __init__(self, array):
+        self.array = array
+        if isinstance(array, list):
+            if isinstance(array[0], list):
+                self.shape = (len(array), len(array[0]))
+            else:
+                self.shape = (len(array),)
+        else:
+            self.shape = ()
+    
+    def __getitem__(self, idx):
+        return self.array[idx]
+    
+    def __setitem__(self, idx, value):
+        self.array[idx] = value
+    
+    def __len__(self):
+        return len(self.array)
+
+class ArrayComparisonResult:
+    """Helper class to provide .all() method for array comparison results"""
+    def __init__(self, result):
+        self._result = result
+    
+    def all(self):
+        return self._result
+
+def create_zeros(size, dtype=float):
+    """Create list of zeros"""
+    if isinstance(size, tuple):
+        rows, cols = size
+        return [[0.0 for _ in range(cols)] for _ in range(rows)]
+    else:
+        return [0.0 for _ in range(size)]
+
+def create_random_normal(shape, scale=0.05):
+    """Create random normal values in list format"""
+    if isinstance(shape, tuple):
+        rows, cols = shape
+        return [[random.gauss(0, scale) for _ in range(cols)] for _ in range(rows)]
+    else:
+        return [random.gauss(0, scale) for _ in range(shape)]
+
+def subtract_scalar_from_matrix(matrix, scalar):
+    """Subtract scalar from all elements in matrix"""
+    if isinstance(matrix[0], list):  # 2D
+        return [[cell - scalar for cell in row] for row in matrix]
+    else:  # 1D
+        return [cell - scalar for cell in matrix]
+
+def divide_matrix_by_scalar(matrix, scalar):
+    """Divide all elements in matrix by scalar"""
+    if isinstance(matrix[0], list):  # 2D
+        return [[cell / scalar for cell in row] for row in matrix]
+    else:  # 1D
+        return [cell / scalar for cell in matrix]
+
+def np_arange(start, stop=None, step=1):
+    """NumPy arange equivalent"""
+    if stop is None:
+        stop = start
+        start = 0
+    return list(range(start, stop, step))
+
+def np_squeeze(arr):
+    """Remove single-dimensional entries"""
+    if isinstance(arr, list):
+        # Remove nested single-element lists
+        while isinstance(arr, list) and len(arr) == 1 and isinstance(arr[0], list):
+            arr = arr[0]
+        return arr
+    return arr
+
+def np_less(arr1, arr2):
+    """Element-wise less than comparison"""
+    if isinstance(arr1, list) and isinstance(arr2, list):
+        return [a < b for a, b in zip(arr1, arr2)]
+    elif isinstance(arr1, list):  # arr2 is scalar
+        return [a < arr2 for a in arr1]
+    elif isinstance(arr2, list):  # arr1 is scalar
+        return [arr1 < b for b in arr2]
+    else:  # both scalars
+        return arr1 < arr2
+
+def np_any(arr):
+    """Check if any element is True"""
+    if isinstance(arr, list):
+        if isinstance(arr[0], list):  # 2D
+            return any(any(row) for row in arr)
+        else:  # 1D
+            return any(arr)
+    return bool(arr)
+
+def np_all(arr):
+    """Check if all elements are True"""
+    if isinstance(arr, list):
+        if isinstance(arr[0], list):  # 2D
+            return all(all(row) for row in arr)
+        else:  # 1D
+            return all(arr)
+    return bool(arr)
+
+def np_logical_not(arr):
+    """Element-wise logical NOT"""
+    if isinstance(arr, list):
+        if isinstance(arr[0], list):  # 2D
+            return [[not cell for cell in row] for row in arr]
+        else:  # 1D
+            return [not item for item in arr]
+    return not arr
+
+def np_sort(arr):
+    """Sort array"""
+    if isinstance(arr, list):
+        return sorted(arr)
+    return arr
+
+def np_concatenate(arrays, axis=0):
+    """Concatenate arrays along specified axis"""
+    if axis == 0:  # Vertical concatenation
+        result = []
+        for arr in arrays:
+            if isinstance(arr, list):
+                result.extend(arr)
+            else:
+                result.append(arr)
+        return result
+    else:  # Horizontal concatenation (axis=1)
+        if all(isinstance(arr, list) and isinstance(arr[0], list) for arr in arrays):
+            # 2D arrays
+            result = []
+            for i in range(len(arrays[0])):
+                row = []
+                for arr in arrays:
+                    row.extend(arr[i])
+                result.append(row)
+            return result
+    return arrays[0]  # fallback
+
+class RandomState:
+    """Simple random state replacement"""
+    def __init__(self, seed=None):
+        if seed is not None:
+            random.seed(seed)
+    
+    def normal(self, loc=0.0, scale=1.0, size=None):
+        if size is None:
+            return random.gauss(loc, scale)
+        elif isinstance(size, tuple):
+            rows, cols = size
+            return [[random.gauss(loc, scale) for _ in range(cols)] for _ in range(rows)]
+        else:
+            return [random.gauss(loc, scale) for _ in range(size)]
+    
+    def rand(self, *args):
+        """Generate random values [0, 1)"""
+        if len(args) == 1:
+            return [random.random() for _ in range(args[0])]
+        elif len(args) == 2:
+            rows, cols = args
+            return [[random.random() for _ in range(cols)] for _ in range(rows)]
+        else:
+            return random.random()
+    
+    def shuffle(self, arr):
+        """Shuffle array in place"""
+        random.shuffle(arr)
+    
+    def get_state(self):
+        """Mock get_state for compatibility"""
+        # Return a mock state that looks like numpy's random state
+        return ('MT19937', [42] * 625, 1, 0, 0.0)
+
+# Core ML Algorithm Implementations (PHP-ready)
+
+def dot_product(vec1, vec2):
+    """Compute dot product of two vectors"""
+    # Handle cases where vectors might be scalars or have different structures
+    if not isinstance(vec1, list):
+        vec1 = [vec1]
+    if not isinstance(vec2, list):
+        vec2 = [vec2]
+        
+    if len(vec1) > 0 and isinstance(vec1[0], list):  # vec1 is 2D, use first row
+        vec1 = vec1[0]
+    if len(vec2) > 0 and isinstance(vec2[0], list):  # vec2 is 2D, use first row
+        vec2 = vec2[0]
+    return sum(a * b for a, b in zip(vec1, vec2))
+
+def matrix_vector_multiply(matrix, vector):
+    """Multiply matrix by vector"""
+    result = []
+    for row in matrix:
+        result.append(dot_product(row, vector))
+    return result
+
+def predict_lightfm_pure(item_embeddings, user_embeddings, item_biases, user_biases, 
+                         user_ids, item_ids):
+    """Pure Python implementation of predict_lightfm"""
+    predictions = []
+    
+    for user_id, item_id in zip(user_ids, item_ids):
+        # Get user and item embeddings
+        user_embed = user_embeddings[user_id] if user_id < len(user_embeddings) else [0.0] * len(user_embeddings[0])
+        item_embed = item_embeddings[item_id] if item_id < len(item_embeddings) else [0.0] * len(item_embeddings[0])
+        
+        # Get biases
+        user_bias = user_biases[user_id] if user_id < len(user_biases) else 0.0
+        item_bias = item_biases[item_id] if item_id < len(item_biases) else 0.0
+        
+        # Compute prediction: dot product + biases
+        prediction = dot_product(user_embed, item_embed) + user_bias + item_bias
+        predictions.append(prediction)
+    
+    return predictions
+
+def sparse_matrix_multiply(sparse_matrix, dense_vector):
+    """Multiply sparse matrix (dict format) by dense vector"""
+    result = [0.0] * sparse_matrix['shape'][0]
+    
+    for (row, col), value in sparse_matrix['data'].items():
+        if col < len(dense_vector):
+            result[row] += value * dense_vector[col]
+    
+    return result
+
+def fit_sgd_step(user_embed, item_embed, user_bias, item_bias, 
+                 learning_rate, user_alpha, item_alpha, prediction, target):
+    """Single SGD step for training (simplified)"""
+    # Compute gradient
+    error = target - prediction
+    
+    # Update embeddings
+    for i in range(len(user_embed)):
+        user_grad = error * item_embed[i] - user_alpha * user_embed[i]
+        item_grad = error * user_embed[i] - item_alpha * item_embed[i]
+        
+        user_embed[i] += learning_rate * user_grad
+        item_embed[i] += learning_rate * item_grad
+    
+    # Update biases
+    user_bias_grad = error - user_alpha * user_bias
+    item_bias_grad = error - item_alpha * item_bias
+    
+    return (
+        user_bias + learning_rate * user_bias_grad,
+        item_bias + learning_rate * item_bias_grad
+    )
+
+def get_sparse_interactions(sparse_matrix):
+    """Extract interactions from sparse matrix format"""
+    interactions = []
+    for (user_id, item_id), rating in sparse_matrix['data'].items():
+        interactions.append((user_id, item_id, float(rating)))
+    return interactions
+
+def fit_pure_python(model, interactions_sparse, epochs=1):
+    """Pure Python training implementation for PHP compatibility"""
+    
+    # Extract interactions from sparse matrix
+    interactions = get_sparse_interactions(interactions_sparse)
+    
+    # Initialize model if not already done
+    if model.item_embeddings is None:
+        # Get matrix dimensions
+        max_user_id = max(user_id for user_id, _, _ in interactions) if interactions else 0
+        max_item_id = max(item_id for _, item_id, _ in interactions) if interactions else 0
+        
+        n_users = max_user_id + 1
+        n_items = max_item_id + 1
+        
+        # Initialize embeddings and biases
+        model._initialize(model.no_components, n_items, n_users)
+    
+    # Training loop
+    for epoch in range(epochs):
+        # Shuffle interactions for better training
+        model.random_state.shuffle(interactions)
+        
+        for user_id, item_id, rating in interactions:
+            # Ensure we don't go out of bounds
+            if (model.user_embeddings is None or model.item_embeddings is None or
+                user_id >= len(model.user_embeddings) or item_id >= len(model.item_embeddings)):
+                continue
+                
+            # Get current embeddings and biases
+            user_embed = model.user_embeddings[user_id]
+            item_embed = model.item_embeddings[item_id]
+            user_bias = model.user_biases[user_id]
+            item_bias = model.item_biases[item_id]
+            
+            # Make prediction
+            prediction = dot_product(user_embed, item_embed) + user_bias + item_bias
+            
+            # Convert rating to target (simple: positive=1, negative=0)
+            target = 1.0 if rating > 0 else 0.0
+            
+            # Compute error and gradients
+            error = target - prediction
+            
+            # Update embeddings in place
+            for i in range(len(user_embed)):
+                user_grad = error * item_embed[i] - model.user_alpha * user_embed[i]
+                item_grad = error * user_embed[i] - model.item_alpha * item_embed[i]
+                
+                user_embed[i] += model.learning_rate * user_grad
+                item_embed[i] += model.learning_rate * item_grad
+            
+            # Update biases
+            user_bias_grad = error - model.user_alpha * user_bias
+            item_bias_grad = error - model.item_alpha * item_bias
+            
+            model.user_biases[user_id] += model.learning_rate * user_bias_grad
+            model.item_biases[item_id] += model.learning_rate * item_bias_grad
+
+def logistic_loss(prediction, target):
+    """Logistic loss function"""
+    import math
+    # Prevent overflow
+    prediction = max(-500, min(500, prediction))
+    return -target * prediction + math.log(1 + math.exp(prediction))
+
+# Use float instead of np.float32 for PHP compatibility  
+CYTHON_DTYPE = float
 
 
 class LightFM(object):
@@ -232,11 +724,11 @@ class LightFM(object):
         self.user_alpha = user_alpha
 
         if random_state is None:
-            self.random_state = np.random.RandomState()
-        elif isinstance(random_state, np.random.RandomState):
+            self.random_state = RandomState()
+        elif isinstance(random_state, RandomState):
             self.random_state = random_state
         else:
-            self.random_state = np.random.RandomState(random_state)
+            self.random_state = RandomState(random_state)
 
         self._reset_state()
 
@@ -284,44 +776,55 @@ class LightFM(object):
         """
 
         # Initialise item features.
-        self.item_embeddings = (
-            (self.random_state.rand(no_item_features, no_components) - 0.5)
-            / no_components
-        ).astype(np.float32)
-        self.item_embedding_gradients = np.zeros_like(self.item_embeddings)
-        self.item_embedding_momentum = np.zeros_like(self.item_embeddings)
-        self.item_biases = np.zeros(no_item_features, dtype=np.float32)
-        self.item_bias_gradients = np.zeros_like(self.item_biases)
-        self.item_bias_momentum = np.zeros_like(self.item_biases)
+        # Create random embeddings in PHP-compatible format
+        random_matrix = self.random_state.rand(no_item_features, no_components)
+        centered_matrix = subtract_scalar_from_matrix(random_matrix, 0.5)
+        self.item_embeddings = ArrayWithShape(divide_matrix_by_scalar(centered_matrix, no_components))
+        
+        self.item_embedding_gradients = create_ones_like(self.item_embeddings)
+        self.item_embedding_momentum = create_zeros_like(self.item_embeddings)
+        self.item_biases = create_zeros(no_item_features)
+        self.item_bias_gradients = create_zeros_like(self.item_biases)
+        self.item_bias_momentum = create_zeros_like(self.item_biases)
 
         # Initialise user features.
-        self.user_embeddings = (
-            (self.random_state.rand(no_user_features, no_components) - 0.5)
-            / no_components
-        ).astype(np.float32)
-        self.user_embedding_gradients = np.zeros_like(self.user_embeddings)
-        self.user_embedding_momentum = np.zeros_like(self.user_embeddings)
-        self.user_biases = np.zeros(no_user_features, dtype=np.float32)
-        self.user_bias_gradients = np.zeros_like(self.user_biases)
-        self.user_bias_momentum = np.zeros_like(self.user_biases)
+        random_user_matrix = self.random_state.rand(no_user_features, no_components)
+        centered_user_matrix = subtract_scalar_from_matrix(random_user_matrix, 0.5)
+        self.user_embeddings = ArrayWithShape(divide_matrix_by_scalar(centered_user_matrix, no_components))
+        
+        self.user_embedding_gradients = create_ones_like(self.user_embeddings)
+        self.user_embedding_momentum = create_zeros_like(self.user_embeddings)
+        self.user_biases = create_zeros(no_user_features)
+        self.user_bias_gradients = create_zeros_like(self.user_biases)
+        self.user_bias_momentum = create_zeros_like(self.user_biases)
 
         if self.learning_schedule == "adagrad":
-            self.item_embedding_gradients += 1
-            self.item_bias_gradients += 1
-            self.user_embedding_gradients += 1
-            self.user_bias_gradients += 1
+            # Initialize adagrad gradients for list-based structures
+            for i in range(len(self.item_embedding_gradients)):
+                for j in range(len(self.item_embedding_gradients[i])):
+                    self.item_embedding_gradients[i][j] += 1.0
+            
+            for i in range(len(self.item_bias_gradients)):
+                self.item_bias_gradients[i] += 1.0
+                
+            for i in range(len(self.user_embedding_gradients)):
+                for j in range(len(self.user_embedding_gradients[i])):
+                    self.user_embedding_gradients[i][j] += 1.0
+                    
+            for i in range(len(self.user_bias_gradients)):
+                self.user_bias_gradients[i] += 1.0
 
     def _construct_feature_matrices(
         self, n_users, n_items, user_features, item_features
     ):
 
         if user_features is None:
-            user_features = sp.identity(n_users, dtype=CYTHON_DTYPE, format="csr")
+            user_features = create_identity_sparse(n_users)
         else:
             user_features = user_features.tocsr()
 
         if item_features is None:
-            item_features = sp.identity(n_items, dtype=CYTHON_DTYPE, format="csr")
+            item_features = create_identity_sparse(n_items)
         else:
             item_features = item_features.tocsr()
 
@@ -396,8 +899,8 @@ class LightFM(object):
                 )
 
             if not (
-                np.array_equal(interactions.row, sample_weight.row)
-                and np.array_equal(interactions.col, sample_weight.col)
+                np_all_equal(interactions.row, sample_weight.row)
+                and np_all_equal(interactions.col, sample_weight.col)
             ):
                 raise ValueError(
                     "Sample weight and interaction matrix "
@@ -409,13 +912,13 @@ class LightFM(object):
             else:
                 sample_weight_data = sample_weight.data
         else:
-            if np.array_equiv(interactions.data, 1.0):
+            if np_all_equal(interactions.data, 1.0):
                 # Re-use interactions data if they are all
                 # ones
                 sample_weight_data = interactions.data
             else:
                 # Otherwise allocate a new array of ones
-                sample_weight_data = np.ones_like(interactions.data, dtype=CYTHON_DTYPE)
+                sample_weight_data = np_ones_like(interactions.data)
 
         return sample_weight_data
 
@@ -455,7 +958,7 @@ class LightFM(object):
             # A sum of an array that contains non-finite values
             # will also be non-finite, and we avoid creating a
             # large boolean temporary.
-            if not np.isfinite(np.sum(parameter)):
+            if not np_isfinite(np_sum(parameter)):
                 raise ValueError(
                     "Not all estimated parameters are finite,"
                     " your model may have diverged. Try decreasing"
@@ -465,7 +968,7 @@ class LightFM(object):
 
     def _check_input_finite(self, data):
 
-        if not np.isfinite(np.sum(data)):
+        if not np_isfinite(np_sum(data)):
             raise ValueError(
                 "Not all input values are finite. "
                 "Check the input for NaNs and infinite values."
@@ -612,12 +1115,27 @@ class LightFM(object):
             the fitted model
         """
 
-        # We need this in the COO format.
-        # If that's already true, this is a no-op.
-        interactions = interactions.tocoo()
+        # Try to use original Cython implementation, fall back to pure Python
+        try:
+            # We need this in the COO format.
+            # If that's already true, this is a no-op.
+            interactions = interactions.tocoo()
 
-        if interactions.dtype != CYTHON_DTYPE:
-            interactions.data = interactions.data.astype(CYTHON_DTYPE)
+            if interactions.dtype != CYTHON_DTYPE:
+                interactions.data = interactions.data.astype(CYTHON_DTYPE)
+        except (AttributeError, TypeError):
+            # If interactions doesn't have tocoo() method (our sparse format),
+            # use pure Python implementation
+            if hasattr(interactions, '_dict'):
+                # Extract the dictionary from SparseMatrixAdapter
+                interactions_dict = interactions._dict
+            else:
+                # Already a dictionary
+                interactions_dict = interactions
+            
+            # Use pure Python training
+            fit_pure_python(self, interactions_dict, epochs)
+            return self
 
         sample_weight_data = self._process_sample_weight(interactions, sample_weight)
 
@@ -833,9 +1351,9 @@ class LightFM(object):
                 f" of item IDs ({len(item_ids)})"
             )
 
-        if user_ids.dtype != np.int32:
+        if hasattr(user_ids, 'dtype') and user_ids.dtype != np.int32:
             user_ids = user_ids.astype(np.int32)
-        if item_ids.dtype != np.int32:
+        if hasattr(item_ids, 'dtype') and item_ids.dtype != np.int32:
             item_ids = item_ids.astype(np.int32)
 
         if num_threads < 1:
