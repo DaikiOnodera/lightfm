@@ -31,6 +31,13 @@ class LilMatrix:
             data.append(value)
         
         return CooMatrix(rows, cols, data, self.shape)
+    
+    def tocsr(self):
+        """Convert to CSR format - returns a CsrMatrix"""
+        csr_mat = CsrMatrix(self.shape, self.dtype)
+        for (row, col), value in self.data.items():
+            csr_mat[row, col] = value
+        return csr_mat
 
 
 class CooMatrix:
@@ -66,6 +73,39 @@ def identity(n, format="csr", dtype=None):
         return mat
     else:
         raise ValueError(f"Format '{format}' not supported")
+
+
+class HStackMatrix:
+    """Simple matrix that horizontally stacks two matrices"""
+    def __init__(self, left_matrix, right_matrix):
+        self.left_matrix = left_matrix
+        self.right_matrix = right_matrix
+        
+        # Ensure both matrices have same number of rows
+        if left_matrix.shape[0] != right_matrix.shape[0]:
+            raise ValueError("Matrices must have same number of rows for horizontal stacking")
+        
+        # Combined shape: same rows, combined columns
+        self.shape = (left_matrix.shape[0], left_matrix.shape[1] + right_matrix.shape[1])
+        self.left_cols = left_matrix.shape[1]
+    
+    def __getitem__(self, key):
+        row, col = key
+        if col < self.left_cols:
+            # Access left matrix
+            return self.left_matrix[row, col]
+        else:
+            # Access right matrix, adjust column index
+            return self.right_matrix[row, col - self.left_cols]
+
+
+def hstack(matrices):
+    """Horizontally stack matrices - simple replacement for scipy.sparse.hstack"""
+    if len(matrices) != 2:
+        raise ValueError("Currently only supports stacking 2 matrices")
+    
+    left, right = matrices
+    return HStackMatrix(left, right)
 
 
 def _read_raw_data(path):
@@ -135,7 +175,7 @@ def _parse_item_metadata(num_items, item_metadata_raw, genres_raw):
     genre_feature_labels = np.array(genres)
 
     id_features = identity(num_items, format="csr", dtype=np.float32)
-    genre_features = sp.lil_matrix((num_items, len(genres)), dtype=np.float32)
+    genre_features = LilMatrix((num_items, len(genres)), dtype=np.float32)
 
     for line in item_metadata_raw:
 
@@ -276,7 +316,7 @@ def fetch_movielens(
         features = genre_features_matrix
         feature_labels = genre_feature_labels
     else:
-        features = sp.hstack([id_features, genre_features_matrix]).tocsr()
+        features = hstack([id_features, genre_features_matrix])
         feature_labels = np.concatenate((id_feature_labels, genre_feature_labels))
 
     data = {
