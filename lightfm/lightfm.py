@@ -82,6 +82,15 @@ class CsrMatrix:
             for key, value in self.data.items():
                 result.data[key] = value * other
             return result
+    
+    @property
+    def has_sorted_indices(self):
+        """For compatibility with scipy - assume indices are always sorted"""
+        return True
+    
+    def sorted_indices(self):
+        """Return self since we assume indices are already sorted"""
+        return self
 
 
 class SimpleMatrixResult:
@@ -100,6 +109,15 @@ class CooMatrix:
         self.col = col
         self.data = data
         self.shape = shape
+    
+    def tocsr(self):
+        """Convert to CSR format - returns a CsrMatrix"""
+        csr_mat = CsrMatrix(self.shape, dtype=getattr(self, 'dtype', None))
+        # Convert COO format to CSR format
+        for i, (row, col) in enumerate(zip(self.row, self.col)):
+            if i < len(self.data):
+                csr_mat[row, col] = self.data[i]
+        return csr_mat
 
 
 def identity(n, format="csr", dtype=None):
