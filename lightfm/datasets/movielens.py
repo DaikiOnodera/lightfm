@@ -42,6 +42,32 @@ class CooMatrix:
         self.shape = shape
 
 
+class CsrMatrix:
+    """Simple replacement for scipy.sparse.csr_matrix"""
+    def __init__(self, shape, dtype=None):
+        self.shape = shape
+        self.dtype = dtype
+        self.data = {}
+    
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    
+    def __getitem__(self, key):
+        return self.data.get(key, 0)
+
+
+def identity(n, format="csr", dtype=None):
+    """Create an identity matrix - simple replacement for scipy.sparse.identity"""
+    if format == "csr":
+        mat = CsrMatrix((n, n), dtype=dtype)
+        # Set diagonal elements to 1
+        for i in range(n):
+            mat[i, i] = 1.0
+        return mat
+    else:
+        raise ValueError(f"Format '{format}' not supported")
+
+
 def _read_raw_data(path):
     """
     Return the raw lines of the train and test files.
@@ -108,7 +134,7 @@ def _parse_item_metadata(num_items, item_metadata_raw, genres_raw):
     id_feature_labels = np.empty(num_items, dtype=str)
     genre_feature_labels = np.array(genres)
 
-    id_features = sp.identity(num_items, format="csr", dtype=np.float32)
+    id_features = identity(num_items, format="csr", dtype=np.float32)
     genre_features = sp.lil_matrix((num_items, len(genres)), dtype=np.float32)
 
     for line in item_metadata_raw:
