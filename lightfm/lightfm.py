@@ -561,13 +561,7 @@ class LightFM(object):
                     " and sample weights"
                 )
 
-    def _check_input_finite(self, data):
 
-        if not np.isfinite(np.sum(data)):
-            raise ValueError(
-                "Not all input values are finite. "
-                "Check the input for NaNs and infinite values."
-            )
 
     @staticmethod
     def _progress(n, verbose):
@@ -710,13 +704,6 @@ class LightFM(object):
             the fitted model
         """
 
-        # We need this in the COO format.
-        # If that's already true, this is a no-op.
-        interactions = interactions.tocoo()
-
-        if interactions.dtype != CYTHON_DTYPE:
-            interactions.data = interactions.data.astype(CYTHON_DTYPE)
-
         sample_weight_data = self._process_sample_weight(interactions, sample_weight)
 
         n_users, n_items = interactions.shape
@@ -724,13 +711,7 @@ class LightFM(object):
             n_users, n_items, user_features, item_features
         )
 
-        for input_data in (
-            user_features.data,
-            item_features.data,
-            interactions.data,
-            sample_weight_data,
-        ):
-            self._check_input_finite(input_data)
+
         if self.item_embeddings is None:
             # Initialise latent factors only if this is the first call
             # to fit_partial.
