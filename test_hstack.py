@@ -150,7 +150,7 @@ def test_hstack_comparison():
         right_scipy[2, 1] = 4.0
         
         # Stack them with scipy
-        scipy_stacked = sp.hstack([left_scipy, right_scipy])
+        scipy_stacked = sp.hstack([left_scipy, right_scipy]).tocsr()  # Convert to CSR for element access
         
         print(f"Scipy stacked matrix shape: {scipy_stacked.shape}")
         
