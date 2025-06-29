@@ -31,6 +31,15 @@ class CsrMatrix:
         return self.data.get(key, 0)
 
 
+class CooMatrix:
+    """Simple replacement for scipy.sparse.coo_matrix"""
+    def __init__(self, row, col, data, shape):
+        self.row = row
+        self.col = col
+        self.data = data
+        self.shape = shape
+
+
 def identity(n, format="csr", dtype=None):
     """Create an identity matrix - simple replacement for scipy.sparse.identity"""
     if format == "csr":
@@ -414,7 +423,7 @@ class LightFM(object):
                     "k-OS loss with sample weights " "not implemented."
                 )
 
-            if not isinstance(sample_weight, sp.coo_matrix):
+            if not isinstance(sample_weight, CooMatrix):
                 raise ValueError("Sample_weight must be a COO matrix.")
 
             if sample_weight.shape != interactions.shape:
