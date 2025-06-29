@@ -4,7 +4,9 @@ Module containing evaluation functions suitable for judging the performance of
 a fitted LightFM model.
 """
 
-import numpy as np
+# Note: numpy import removed for PHP compatibility
+# Import our custom numpy replacement functions
+from .lightfm import np_less, np_squeeze, np_all, create_zeros
 
 from ._lightfm_fast import CSRMatrix, calculate_auc_from_rank
 
@@ -77,9 +79,10 @@ def precision_at_k(
         check_intersections=check_intersections,
     )
 
-    ranks.data = np.less(ranks.data, k, ranks.data)
+    ranks.data = np_less(ranks.data, k)
 
-    precision = np.squeeze(np.array(ranks.sum(axis=1))) / k
+    precision = np_squeeze(list(ranks.sum(axis=1))) 
+    precision = [p / k for p in precision]
 
     if not preserve_rows:
         precision = precision[test_interactions.getnnz(axis=1) > 0]
@@ -232,14 +235,14 @@ def auc_score(
 
     assert np.all(ranks.data >= 0)
 
-    auc = np.zeros(ranks.shape[0], dtype=np.float32)
+    auc = create_zeros(ranks.shape[0])
 
     if train_interactions is not None:
         num_train_positives = np.squeeze(
             np.array(train_interactions.getnnz(axis=1)).astype(np.int32)
         )
     else:
-        num_train_positives = np.zeros(test_interactions.shape[0], dtype=np.int32)
+        num_train_positives = create_zeros(test_interactions.shape[0])
 
     # The second argument is modified in-place, but
     # here we don't care about the inconsistency
