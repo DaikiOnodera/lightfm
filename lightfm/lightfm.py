@@ -75,33 +75,38 @@ class CsrMatrix:
         """Update CSR format arrays (data, indices, indptr) from dict data"""
         if not self.data:
             # Empty matrix
-            self.data_array = []
-            self.indices = []
-            self.indptr = [0] * (self.shape[0] + 1)
+            self.data_array = np.array([], dtype=np.float32)
+            self.indices = np.array([], dtype=np.int32)
+            self.indptr = np.array([0] * (self.shape[0] + 1), dtype=np.int32)
             return
         
         # Sort by row, then by column
         sorted_items = sorted(self.data.items(), key=lambda x: (x[0][0], x[0][1]))
         
-        self.data_array = []
-        self.indices = []
-        self.indptr = [0]
+        data_list = []
+        indices_list = []
+        indptr_list = [0]
         
         current_row = 0
         for (row, col), value in sorted_items:
             # Fill indptr for any missing rows
             while current_row < row:
-                self.indptr.append(len(self.data_array))
+                indptr_list.append(len(data_list))
                 current_row += 1
             
-            self.data_array.append(value)
-            self.indices.append(col)
+            data_list.append(value)
+            indices_list.append(col)
             current_row = row
         
         # Fill remaining indptr entries
         while current_row < self.shape[0]:
-            self.indptr.append(len(self.data_array))
+            indptr_list.append(len(data_list))
             current_row += 1
+        
+        # Convert to numpy arrays
+        self.data_array = np.array(data_list, dtype=np.float32)
+        self.indices = np.array(indices_list, dtype=np.int32)
+        self.indptr = np.array(indptr_list, dtype=np.int32)
     
     def __mul__(self, other):
         """Basic matrix multiplication for simple cases"""

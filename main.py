@@ -12,3 +12,4 @@ model.fit(data['train'], epochs=30, num_threads=2)
 
 # Evaluate the trained model
 test_precision = precision_at_k(model, data['test'], k=5).mean()
+print(test_precision)
