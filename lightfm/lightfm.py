@@ -30,20 +30,22 @@ class CsrMatrix:
                 # Case 1: Shape tuple like (n_users, n_items)
                 self.shape = arg1
                 self.dtype = dtype
-                self.data = {}
+                self._data_dict = {}  # Internal dict storage
                 self.indices = []
                 self.indptr = [0] * (arg1[0] + 1)  # indptr for empty matrix
+                self._update_csr_arrays()  # Initialize numpy arrays
             elif len(arg1) == 3:
                 # Case 2: CSR format (data, indices, indptr)
                 data_arr, self.indices, self.indptr = arg1
                 self.shape = shape
                 self.dtype = dtype
-                self.data = {}
+                self._data_dict = {}  # Internal dict storage
+                self.data = data_arr  # For Cython compatibility
                 # Convert CSR format to our dict format
                 for i in range(len(self.indptr) - 1):
                     for j in range(self.indptr[i], self.indptr[i + 1]):
                         if j < len(self.indices):
-                            self.data[(i, self.indices[j])] = data_arr[j] if j < len(data_arr) else 0
+                            self._data_dict[(i, self.indices[j])] = data_arr[j] if j < len(data_arr) else 0
         else:
             # Case 3: Convert from another matrix (could be our custom matrix or array)
             if hasattr(arg1, 'shape'):
@@ -56,32 +58,36 @@ class CsrMatrix:
                     self.shape = (1, 1)
             
             self.dtype = dtype
-            self.data = {}
+            self._data_dict = {}  # Internal dict storage
             self.indices = []
             self.indptr = [0] * (self.shape[0] + 1)
             
             # Copy data if available
-            if hasattr(arg1, 'data') and hasattr(arg1.data, 'items'):
-                self.data = dict(arg1.data)
+            if hasattr(arg1, '_data_dict') and hasattr(arg1._data_dict, 'items'):
+                self._data_dict = dict(arg1._data_dict)
+            elif hasattr(arg1, 'data') and hasattr(arg1.data, 'items'):
+                self._data_dict = dict(arg1.data)
+            
+            self._update_csr_arrays()  # Initialize numpy arrays
     
     def __setitem__(self, key, value):
-        self.data[key] = value
+        self._data_dict[key] = value
         self._update_csr_arrays()
     
     def __getitem__(self, key):
-        return self.data.get(key, 0)
+        return self._data_dict.get(key, 0)
     
     def _update_csr_arrays(self):
         """Update CSR format arrays (data, indices, indptr) from dict data"""
-        if not self.data:
+        if not self._data_dict:
             # Empty matrix
-            self.data_array = np.array([], dtype=np.float32)
+            self.data = np.array([], dtype=np.float32)  # For Cython compatibility
             self.indices = np.array([], dtype=np.int32)
             self.indptr = np.array([0] * (self.shape[0] + 1), dtype=np.int32)
             return
         
         # Sort by row, then by column
-        sorted_items = sorted(self.data.items(), key=lambda x: (x[0][0], x[0][1]))
+        sorted_items = sorted(self._data_dict.items(), key=lambda x: (x[0][0], x[0][1]))
         
         data_list = []
         indices_list = []
@@ -104,7 +110,7 @@ class CsrMatrix:
             current_row += 1
         
         # Convert to numpy arrays
-        self.data_array = np.array(data_list, dtype=np.float32)
+        self.data = np.array(data_list, dtype=np.float32)  # For Cython compatibility
         self.indices = np.array(indices_list, dtype=np.int32)
         self.indptr = np.array(indptr_list, dtype=np.int32)
     

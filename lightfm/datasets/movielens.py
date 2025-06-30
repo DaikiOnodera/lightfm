@@ -63,29 +63,29 @@ class CsrMatrix:
     def __init__(self, shape, dtype=None):
         self.shape = shape
         self.dtype = dtype
-        self.data = {}
+        self._data_dict = {}  # Internal dict storage
         self._update_csr_arrays()
     
     def __setitem__(self, key, value):
-        self.data[key] = value
+        self._data_dict[key] = value
         self._update_csr_arrays()
     
     def __getitem__(self, key):
-        return self.data.get(key, 0)
+        return self._data_dict.get(key, 0)
     
     def _update_csr_arrays(self):
         """Update CSR format arrays (data, indices, indptr) from dict data"""
         import numpy as np
         
-        if not self.data:
+        if not self._data_dict:
             # Empty matrix
-            self.data_array = np.array([], dtype=np.float32)
+            self.data = np.array([], dtype=np.float32)  # For Cython compatibility
             self.indices = np.array([], dtype=np.int32)
             self.indptr = np.array([0] * (self.shape[0] + 1), dtype=np.int32)
             return
         
         # Sort by row, then by column
-        sorted_items = sorted(self.data.items(), key=lambda x: (x[0][0], x[0][1]))
+        sorted_items = sorted(self._data_dict.items(), key=lambda x: (x[0][0], x[0][1]))
         
         data_list = []
         indices_list = []
@@ -108,7 +108,7 @@ class CsrMatrix:
             current_row += 1
         
         # Convert to numpy arrays
-        self.data_array = np.array(data_list, dtype=np.float32)
+        self.data = np.array(data_list, dtype=np.float32)  # For Cython compatibility
         self.indices = np.array(indices_list, dtype=np.int32)
         self.indptr = np.array(indptr_list, dtype=np.int32)
     
