@@ -6,7 +6,7 @@ a fitted LightFM model.
 
 import numpy as np
 
-from ._lightfm_fast import CSRMatrix, calculate_auc_from_rank
+from ._lightfm_pure import CSRMatrix, calculate_auc_from_rank
 
 __all__ = ["precision_at_k", "recall_at_k", "auc_score", "reciprocal_rank"]
 

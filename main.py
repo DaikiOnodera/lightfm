@@ -8,7 +8,7 @@ data = fetch_movielens(min_rating=5.0)
 
 # Instantiate and train the model
 model = LightFM(loss='warp')
-model.fit(data['train'], epochs=30, num_threads=2)
+model.fit(data['train'], epochs=1, num_threads=2)
 
 # Evaluate the trained model
 test_precision = precision_at_k(model, data['test'], k=5).mean()

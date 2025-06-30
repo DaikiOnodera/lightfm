@@ -142,6 +142,30 @@ class CsrMatrix:
         new_matrix._data_dict = dict(self._data_dict)
         new_matrix._update_csr_arrays()
         return new_matrix
+    
+    def sum(self, axis=None):
+        """Sum matrix elements along given axis"""
+        if axis is None:
+            # Sum all elements
+            return sum(self._data_dict.values())
+        elif axis == 0:
+            # Sum along rows (return column sums)
+            col_sums = {}
+            for (row, col), value in self._data_dict.items():
+                col_sums[col] = col_sums.get(col, 0) + value
+            # Convert to list with zeros for missing columns
+            result = [col_sums.get(i, 0) for i in range(self.shape[1])]
+            return result
+        elif axis == 1:
+            # Sum along columns (return row sums)
+            row_sums = {}
+            for (row, col), value in self._data_dict.items():
+                row_sums[row] = row_sums.get(row, 0) + value
+            # Convert to list with zeros for missing rows
+            result = [row_sums.get(i, 0) for i in range(self.shape[0])]
+            return result
+        else:
+            raise ValueError(f"Invalid axis {axis} for 2D matrix")
 
 
 class SimpleMatrixResult:
@@ -169,6 +193,28 @@ class CooMatrix:
             if i < len(self.data):
                 csr_mat[row, col] = self.data[i]
         return csr_mat
+    
+    def getnnz(self, axis=None):
+        """Get number of non-zero elements along given axis"""
+        if axis is None:
+            # Total number of non-zero elements
+            return len(self.data)
+        elif axis == 0:
+            # Number of non-zeros per column
+            col_nnz = {}
+            for row, col in zip(self.row, self.col):
+                col_nnz[col] = col_nnz.get(col, 0) + 1
+            result = [col_nnz.get(i, 0) for i in range(self.shape[1])]
+            return np.array(result)
+        elif axis == 1:
+            # Number of non-zeros per row
+            row_nnz = {}
+            for row, col in zip(self.row, self.col):
+                row_nnz[row] = row_nnz.get(row, 0) + 1
+            result = [row_nnz.get(i, 0) for i in range(self.shape[0])]
+            return np.array(result)
+        else:
+            raise ValueError(f"Invalid axis {axis} for 2D matrix")
 
 
 def identity(n, format="csr", dtype=None):
