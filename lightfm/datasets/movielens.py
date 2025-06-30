@@ -64,12 +64,46 @@ class CsrMatrix:
         self.shape = shape
         self.dtype = dtype
         self.data = {}
+        self._update_csr_arrays()
     
     def __setitem__(self, key, value):
         self.data[key] = value
+        self._update_csr_arrays()
     
     def __getitem__(self, key):
         return self.data.get(key, 0)
+    
+    def _update_csr_arrays(self):
+        """Update CSR format arrays (data, indices, indptr) from dict data"""
+        if not self.data:
+            # Empty matrix
+            self.data_array = []
+            self.indices = []
+            self.indptr = [0] * (self.shape[0] + 1)
+            return
+        
+        # Sort by row, then by column
+        sorted_items = sorted(self.data.items(), key=lambda x: (x[0][0], x[0][1]))
+        
+        self.data_array = []
+        self.indices = []
+        self.indptr = [0]
+        
+        current_row = 0
+        for (row, col), value in sorted_items:
+            # Fill indptr for any missing rows
+            while current_row < row:
+                self.indptr.append(len(self.data_array))
+                current_row += 1
+            
+            self.data_array.append(value)
+            self.indices.append(col)
+            current_row = row
+        
+        # Fill remaining indptr entries
+        while current_row < self.shape[0]:
+            self.indptr.append(len(self.data_array))
+            current_row += 1
     
     @property
     def has_sorted_indices(self):
