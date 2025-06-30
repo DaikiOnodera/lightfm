@@ -5,7 +5,7 @@ import numpy as np
 
 
 
-from ._lightfm_fast import (
+from ._lightfm_pure import (
     CSRMatrix,
     FastLightFM,
     fit_bpr,
