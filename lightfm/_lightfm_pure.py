@@ -279,20 +279,17 @@ def predict_lightfm(item_features, user_features, item_biases, user_biases,
     return predictions
 
 
-def predict_ranks(item_features, user_features, item_biases, user_biases,
-                 test_interactions, train_interactions, lightfm_data, num_threads):
+def predict_ranks(item_features, user_features, test_interactions, train_interactions,
+                 ranks_data, lightfm_data, num_threads):
     """
     Pure Python implementation of rank prediction.
     Simplified version of the Cython predict_ranks function.
     """
     print("Warning: Using simplified pure Python predict_ranks implementation")
     
-    # Return dummy ranks for now
-    ranks = []
-    for idx in range(len(test_interactions.data)):
-        ranks.append(1.0)  # Dummy rank
-    
-    return ranks
+    # Fill the ranks_data array with dummy values
+    for idx in range(len(ranks_data)):
+        ranks_data[idx] = 1.0  # Dummy rank
 
 
 def calculate_auc_from_rank(ranks, test_interactions, num_threads):

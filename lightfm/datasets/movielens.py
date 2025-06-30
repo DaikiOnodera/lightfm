@@ -120,6 +120,13 @@ class CsrMatrix:
     def sorted_indices(self):
         """Return self since we assume indices are already sorted"""
         return self
+    
+    def astype(self, dtype):
+        """Convert matrix to given dtype - for compatibility"""
+        new_matrix = CsrMatrix(self.shape, dtype=dtype)
+        new_matrix._data_dict = dict(self._data_dict)
+        new_matrix._update_csr_arrays()
+        return new_matrix
 
 
 def identity(n, format="csr", dtype=None):
