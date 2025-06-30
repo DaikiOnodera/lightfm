@@ -4,9 +4,222 @@ import zipfile
 
 import numpy as np
 
-import scipy.sparse as sp
+
 
 from lightfm.datasets import _common
+
+
+class LilMatrix:
+    """Simple replacement for scipy.sparse.lil_matrix"""
+    def __init__(self, shape, dtype=None):
+        self.shape = shape
+        self.dtype = dtype
+        self.data = {}
+    
+    def __setitem__(self, key, value):
+        self.data[key] = value
+    
+    def tocoo(self):
+        """Convert to COO format - returns a simple object with row, col, data arrays"""
+        rows = []
+        cols = []
+        data = []
+        
+        for (row, col), value in self.data.items():
+            rows.append(row)
+            cols.append(col)
+            data.append(value)
+        
+        return CooMatrix(rows, cols, data, self.shape)
+    
+    def tocsr(self):
+        """Convert to CSR format - returns a CsrMatrix"""
+        csr_mat = CsrMatrix(self.shape, self.dtype)
+        for (row, col), value in self.data.items():
+            csr_mat[row, col] = value
+        return csr_mat
+
+
+class CooMatrix:
+    """Simple replacement for scipy.sparse.coo_matrix"""
+    def __init__(self, row, col, data, shape):
+        self.row = row
+        self.col = col
+        self.data = data
+        self.shape = shape
+    
+    def tocsr(self):
+        """Convert to CSR format - returns a CsrMatrix"""
+        csr_mat = CsrMatrix(self.shape, dtype=getattr(self, 'dtype', None))
+        # Convert COO format to CSR format
+        for i, (row, col) in enumerate(zip(self.row, self.col)):
+            if i < len(self.data):
+                csr_mat[row, col] = self.data[i]
+        return csr_mat
+    
+    def getnnz(self, axis=None):
+        """Get number of non-zero elements along given axis"""
+        import numpy as np
+        
+        if axis is None:
+            # Total number of non-zero elements
+            return len(self.data)
+        elif axis == 0:
+            # Number of non-zeros per column
+            col_nnz = {}
+            for row, col in zip(self.row, self.col):
+                col_nnz[col] = col_nnz.get(col, 0) + 1
+            result = [col_nnz.get(i, 0) for i in range(self.shape[1])]
+            return np.array(result)
+        elif axis == 1:
+            # Number of non-zeros per row
+            row_nnz = {}
+            for row, col in zip(self.row, self.col):
+                row_nnz[row] = row_nnz.get(row, 0) + 1
+            result = [row_nnz.get(i, 0) for i in range(self.shape[0])]
+            return np.array(result)
+        else:
+            raise ValueError(f"Invalid axis {axis} for 2D matrix")
+
+
+class CsrMatrix:
+    """Simple replacement for scipy.sparse.csr_matrix"""
+    def __init__(self, shape, dtype=None):
+        self.shape = shape
+        self.dtype = dtype
+        self._data_dict = {}  # Internal dict storage
+        self._update_csr_arrays()
+    
+    def __setitem__(self, key, value):
+        self._data_dict[key] = value
+        self._update_csr_arrays()
+    
+    def __getitem__(self, key):
+        return self._data_dict.get(key, 0)
+    
+    def _update_csr_arrays(self):
+        """Update CSR format arrays (data, indices, indptr) from dict data"""
+        import numpy as np
+        
+        if not self._data_dict:
+            # Empty matrix
+            self.data = np.array([], dtype=np.float32)  # For Cython compatibility
+            self.indices = np.array([], dtype=np.int32)
+            self.indptr = np.array([0] * (self.shape[0] + 1), dtype=np.int32)
+            return
+        
+        # Sort by row, then by column
+        sorted_items = sorted(self._data_dict.items(), key=lambda x: (x[0][0], x[0][1]))
+        
+        data_list = []
+        indices_list = []
+        indptr_list = [0]
+        
+        current_row = 0
+        for (row, col), value in sorted_items:
+            # Fill indptr for any missing rows
+            while current_row < row:
+                indptr_list.append(len(data_list))
+                current_row += 1
+            
+            data_list.append(value)
+            indices_list.append(col)
+            current_row = row
+        
+        # Fill remaining indptr entries
+        while current_row < self.shape[0]:
+            indptr_list.append(len(data_list))
+            current_row += 1
+        
+        # Convert to numpy arrays
+        self.data = np.array(data_list, dtype=np.float32)  # For Cython compatibility
+        self.indices = np.array(indices_list, dtype=np.int32)
+        self.indptr = np.array(indptr_list, dtype=np.int32)
+    
+    @property
+    def has_sorted_indices(self):
+        """For compatibility with scipy - assume indices are always sorted"""
+        return True
+    
+    def sorted_indices(self):
+        """Return self since we assume indices are already sorted"""
+        return self
+    
+    def astype(self, dtype):
+        """Convert matrix to given dtype - for compatibility"""
+        new_matrix = CsrMatrix(self.shape, dtype=dtype)
+        new_matrix._data_dict = dict(self._data_dict)
+        new_matrix._update_csr_arrays()
+        return new_matrix
+    
+    def sum(self, axis=None):
+        """Sum matrix elements along given axis"""
+        if axis is None:
+            # Sum all elements
+            return sum(self._data_dict.values())
+        elif axis == 0:
+            # Sum along rows (return column sums)
+            col_sums = {}
+            for (row, col), value in self._data_dict.items():
+                col_sums[col] = col_sums.get(col, 0) + value
+            # Convert to list with zeros for missing columns
+            result = [col_sums.get(i, 0) for i in range(self.shape[1])]
+            return result
+        elif axis == 1:
+            # Sum along columns (return row sums)
+            row_sums = {}
+            for (row, col), value in self._data_dict.items():
+                row_sums[row] = row_sums.get(row, 0) + value
+            # Convert to list with zeros for missing rows
+            result = [row_sums.get(i, 0) for i in range(self.shape[0])]
+            return result
+        else:
+            raise ValueError(f"Invalid axis {axis} for 2D matrix")
+
+
+def identity(n, format="csr", dtype=None):
+    """Create an identity matrix - simple replacement for scipy.sparse.identity"""
+    if format == "csr":
+        mat = CsrMatrix((n, n), dtype=dtype)
+        # Set diagonal elements to 1
+        for i in range(n):
+            mat[i, i] = 1.0
+        return mat
+    else:
+        raise ValueError(f"Format '{format}' not supported")
+
+
+class HStackMatrix:
+    """Simple matrix that horizontally stacks two matrices"""
+    def __init__(self, left_matrix, right_matrix):
+        self.left_matrix = left_matrix
+        self.right_matrix = right_matrix
+        
+        # Ensure both matrices have same number of rows
+        if left_matrix.shape[0] != right_matrix.shape[0]:
+            raise ValueError("Matrices must have same number of rows for horizontal stacking")
+        
+        # Combined shape: same rows, combined columns
+        self.shape = (left_matrix.shape[0], left_matrix.shape[1] + right_matrix.shape[1])
+        self.left_cols = left_matrix.shape[1]
+    
+    def __getitem__(self, key):
+        row, col = key
+        if col < self.left_cols:
+            # Access left matrix
+            return self.left_matrix[row, col]
+        else:
+            # Access right matrix, adjust column index
+            return self.right_matrix[row, col - self.left_cols]
+
+
+def hstack(matrices):
+    """Horizontally stack matrices - simple replacement for scipy.sparse.hstack"""
+    if len(matrices) != 2:
+        raise ValueError("Currently only supports stacking 2 matrices")
+    
+    left, right = matrices
+    return HStackMatrix(left, right)
 
 
 def _read_raw_data(path):
@@ -54,7 +267,7 @@ def _get_dimensions(train_data, test_data):
 
 def _build_interaction_matrix(rows, cols, data, min_rating):
 
-    mat = sp.lil_matrix((rows, cols), dtype=np.int32)
+    mat = LilMatrix((rows, cols), dtype=np.int32)
 
     for uid, iid, rating, _ in data:
         if rating >= min_rating:
@@ -75,8 +288,8 @@ def _parse_item_metadata(num_items, item_metadata_raw, genres_raw):
     id_feature_labels = np.empty(num_items, dtype=str)
     genre_feature_labels = np.array(genres)
 
-    id_features = sp.identity(num_items, format="csr", dtype=np.float32)
-    genre_features = sp.lil_matrix((num_items, len(genres)), dtype=np.float32)
+    id_features = identity(num_items, format="csr", dtype=np.float32)
+    genre_features = LilMatrix((num_items, len(genres)), dtype=np.float32)
 
     for line in item_metadata_raw:
 
@@ -217,7 +430,7 @@ def fetch_movielens(
         features = genre_features_matrix
         feature_labels = genre_feature_labels
     else:
-        features = sp.hstack([id_features, genre_features_matrix]).tocsr()
+        features = hstack([id_features, genre_features_matrix])
         feature_labels = np.concatenate((id_feature_labels, genre_feature_labels))
 
     data = {
